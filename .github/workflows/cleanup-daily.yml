@@ -1,0 +1,41 @@
+name: 每日清理已合并分支
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # UTC 4:00 = 北京时间 12:00
+  workflow_dispatch:        # 允许手动触发
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 清理已合并的 friend-link 分支
+        run: |
+          # 确保 main 最新
+          git fetch origin main
+          git checkout main
+
+          merged=$(git branch -r --merged origin/main | \
+            grep 'origin/friend-link/' | \
+            sed 's|origin/||' | \
+            tr -d ' ')
+
+          if [ -z "$merged" ]; then
+            echo "没有需要清理的分支"
+            exit 0
+          fi
+
+          echo "以下分支已合并到 main，将被删除："
+          echo "$merged"
+
+          for branch in $merged; do
+            git push origin --delete "$branch" 2>/dev/null && \
+              echo "✓ 已删除: $branch" || \
+              echo "✗ 失败: $branch"
+          done

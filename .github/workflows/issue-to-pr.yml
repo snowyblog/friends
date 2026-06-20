@@ -28,14 +28,16 @@ jobs:
             const path = require("path");
             const yaml = require("yaml");
 
-            const body = context.payload.issue.body;
+            // GitHub Issue body 使用 \r\n 换行，先统一为 \n
+            const body = context.payload.issue.body.replace(/\r\n/g, "\n");
             const errors = [];
 
+            // 按 "### " 分段解析表单字段
             function extractField(title) {
-              const regex = new RegExp(`### ${title}\s*\n+([\s\S]*?)(?=\n###|\n*$)`, "i");
+              const regex = new RegExp(`### ${title}\\s*\\n+([\\s\\S]*?)(?=\\n###|$)`, "i");
               const match = body.match(regex);
               if (match && match[1]) {
-                return match[1].replace(/\r/g, "").trim();
+                return match[1].trim();
               }
               return "";
             }
@@ -51,7 +53,9 @@ jobs:
             if (!url) {
               errors.push("博客网址 不能为空");
             } else {
-              try { new URL(url); } catch {
+              try {
+                new URL(url);
+              } catch {
                 errors.push("网址格式不合法: " + url);
               }
             }
@@ -59,7 +63,9 @@ jobs:
             if (!icon) {
               errors.push("图标 URL 不能为空");
             } else {
-              try { new URL(icon); } catch {
+              try {
+                new URL(icon);
+              } catch {
                 errors.push("图标 URL 格式不合法: " + icon);
               }
             }
@@ -78,7 +84,7 @@ jobs:
               } catch {}
             }
 
-            // URL 可达性检测
+            // URL 可达性检测（跳过校验失败的才检测）
             if (!errors.some(e => e.includes("网址"))) {
               try {
                 execSync('curl -sS -o /dev/null -w "%{http_code}" --max-time 15 -L "' + url + '"', { encoding: "utf-8" });

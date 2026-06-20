@@ -1,0 +1,30 @@
+name: PR 关闭后清理分支
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 删除已合并/已关闭 PR 的源分支
+        run: |
+          branch="${{ github.event.pull_request.head.ref }}"
+          # 只清理 friend-link/ 前缀的分支
+          case "$branch" in
+            friend-link/*)
+              git push origin --delete "$branch" 2>/dev/null && \
+                echo "已删除分支: $branch" || \
+                echo "分支已不存在或无法删除: $branch"
+              ;;
+            *)
+              echo "跳过非 CI 分支: $branch"
+              ;;
+          esac

@@ -6,8 +6,7 @@ on:
 
 jobs:
   parse-and-pr:
-    # 仅处理带有「友链申请」标签的 issue
-    if: contains(github.event.issue.labels.*.name, '友链申请')
+    if: contains(github.event.issue.body, '### 博客名称')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -16,87 +15,108 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 解析 Issue 表单并校验
+      - name: 安装依赖
+        run: npm install yaml
+
+      - name: 解析表单 + 校验 + 检测 URL 可达性
         id: parse
         uses: actions/github-script@v7
         with:
           script: |
+            const { execSync } = require("child_process");
+            const fs = require("fs");
+            const path = require("path");
+            const yaml = require("yaml");
+
             const body = context.payload.issue.body;
             const errors = [];
 
-            // 从 Issue Form 生成的 markdown 中提取字段值
-            // Issue Form 输出格式: ### 字段标题\n\n字段值\n\n
             function extractField(title) {
-              const regex = new RegExp(`### ${title}\s*\n+([\s\S]*?)(?=\n###|\n*$)`, 'i');
+              const regex = new RegExp(`### ${title}\s*\n+([\s\S]*?)(?=\n###|\n*$)`, "i");
               const match = body.match(regex);
               if (match && match[1]) {
-                return match[1].replace(/\r/g, '').trim();
+                return match[1].replace(/\r/g, "").trim();
               }
-              return '';
+              return "";
             }
 
-            const name = extractField('博客名称');
-            const url = extractField('博客网址');
-            const description = extractField('博客简介');
-            const icon = extractField('图标 URL');
+            const name = extractField("博客名称");
+            const url = extractField("博客网址");
+            const description = extractField("博客简介");
+            const icon = extractField("图标 URL");
 
-            // 校验
-            if (!name) errors.push('博客名称 不能为空');
-            if (!description) errors.push('博客简介 不能为空');
+            if (!name) errors.push("博客名称 不能为空");
+            if (!description) errors.push("博客简介 不能为空");
+
             if (!url) {
-              errors.push('博客网址 不能为空');
+              errors.push("博客网址 不能为空");
             } else {
-              try {
-                new URL(url);
-              } catch {
-                errors.push(`网址格式不合法: "${url}"`);
-              }
-            }
-            if (!icon) {
-              errors.push('图标 URL 不能为空');
-            } else {
-              try {
-                new URL(icon);
-              } catch {
-                errors.push(`图标 URL 格式不合法: "${icon}"`);
+              try { new URL(url); } catch {
+                errors.push("网址格式不合法: " + url);
               }
             }
 
-            // 检查是否已存在同名文件
-            const fs = require('fs');
-            const path = require('path');
-            const safeFileName = name.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unknown';
-            const linksDir = path.join(process.env.GITHUB_WORKSPACE, 'links');
-            const existingFiles = fs.readdirSync(linksDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
-            const targetFile = `${safeFileName}.yaml`;
-            
-            // 也检查 URL 重复
-            const yaml = require('yaml');
+            if (!icon) {
+              errors.push("图标 URL 不能为空");
+            } else {
+              try { new URL(icon); } catch {
+                errors.push("图标 URL 格式不合法: " + icon);
+              }
+            }
+
+            // 检查重复
+            const safeFileName = name.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
+            const linksDir = path.join(process.env.GITHUB_WORKSPACE, "links");
+            const existingFiles = fs.readdirSync(linksDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
             for (const file of existingFiles) {
-              const content = fs.readFileSync(path.join(linksDir, file), 'utf-8');
+              const content = fs.readFileSync(path.join(linksDir, file), "utf-8");
               try {
                 const data = yaml.parse(content);
                 if (data && data.url === url) {
-                  errors.push(`该网址已在 ${file} 中提交过，请勿重复申请`);
+                  errors.push("该网址已在 " + file + " 中提交过，请勿重复申请");
                 }
               } catch {}
             }
 
-            core.setOutput('name', name);
-            core.setOutput('url', url);
-            core.setOutput('description', description);
-            core.setOutput('icon', icon);
-            core.setOutput('safeFileName', safeFileName);
-            core.setOutput('errors', JSON.stringify(errors));
-            core.setOutput('has_errors', errors.length > 0 ? 'true' : 'false');
+            // URL 可达性检测
+            if (!errors.some(e => e.includes("网址"))) {
+              try {
+                execSync('curl -sS -o /dev/null -w "%{http_code}" --max-time 15 -L "' + url + '"', { encoding: "utf-8" });
+              } catch (e) {
+                errors.push("网址无法访问: " + url + "（请确认博客是否正常运行）");
+              }
+            }
+
+            // 图标 URL 可达性检测
+            if (!errors.some(e => e.includes("图标"))) {
+              try {
+                execSync('curl -sS -o /dev/null -w "%{http_code}" --max-time 15 -L "' + icon + '"', { encoding: "utf-8" });
+              } catch (e) {
+                errors.push("图标无法访问: " + icon + "（请确认图标 URL 是否有效）");
+              }
+            }
+
+            core.setOutput("name", name);
+            core.setOutput("url", url);
+            core.setOutput("description", description);
+            core.setOutput("icon", icon);
+            core.setOutput("safeFileName", safeFileName);
+            core.setOutput("errors", JSON.stringify(errors));
+            core.setOutput("has_errors", errors.length > 0 ? "true" : "false");
 
       - name: 校验失败 — 关闭 Issue 并回复
         if: steps.parse.outputs.has_errors == 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const errors = JSON.parse('${{ steps.parse.outputs.errors }}');
-            const body = `❌ 友链申请校验未通过：\n\n${errors.map(e => `- ${e}`).join('\n')}\n\n请修正后重新提交。`;
+            const errors = JSON.parse(process.env.ERRORS);
+            const body = [
+              "## 校验未通过",
+              "",
+              ...errors.map(e => "- " + e),
+              "",
+              "请修正后重新提交一个新的 Issue。",
+            ].join("\n");
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -107,76 +127,79 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              state: 'closed',
-              labels: ['校验未通过'],
+              state: "closed",
             });
+        env:
+          ERRORS: ${{ steps.parse.outputs.errors }}
 
       - name: 校验通过 — 创建 PR
         if: steps.parse.outputs.has_errors == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            const path = require('path');
-            const yaml = require('yaml');
+            const fs = require("fs");
+            const path = require("path");
+            const yaml = require("yaml");
+            const { execSync } = require("child_process");
 
-            const name = '${{ steps.parse.outputs.name }}'.replace(/'/g, "'\''");
-            const url = '${{ steps.parse.outputs.url }}';
-            const description = '${{ steps.parse.outputs.description }}'.replace(/'/g, "'\''");
-            const icon = '${{ steps.parse.outputs.icon }}';
-            const safeFileName = '${{ steps.parse.outputs.safeFileName }}';
-            const branchName = `friend-link/${safeFileName}-${Date.now()}`;
+            const name = process.env.NAME;
+            const url = process.env.URL;
+            const description = process.env.DESC;
+            const icon = process.env.ICON;
+            const safeFileName = process.env.SAFE_FILE;
 
-            const yamlContent = yaml.stringify({
-              name,
-              description,
-              url,
-              icon,
-            });
+            let finalName = safeFileName;
+            let counter = 1;
+            while (fs.existsSync(path.join(process.env.GITHUB_WORKSPACE, "links", finalName + ".yaml"))) {
+              finalName = safeFileName + "-" + counter;
+              counter++;
+            }
 
-            const filePath = path.join(process.env.GITHUB_WORKSPACE, 'links', `${safeFileName}.yaml`);
-            fs.writeFileSync(filePath, yamlContent, 'utf-8');
+            const yamlContent = yaml.stringify({ name, description, url, icon });
+            fs.writeFileSync(path.join(process.env.GITHUB_WORKSPACE, "links", finalName + ".yaml"), yamlContent, "utf-8");
 
-            // 创建分支并提交
-            const { execSync } = require('child_process');
-            execSync(`git config user.name "github-actions[bot]"`);
-            execSync(`git config user.email "github-actions[bot]@users.noreply.github.com"`);
-            execSync(`git checkout -b "${branchName}"`);
-            execSync(`git add links/${safeFileName}.yaml`);
-            execSync(`git commit -m "添加友链：${name}"`);
-            execSync(`git push origin "${branchName}"`);
+            const branchName = "friend-link/" + finalName + "-" + Date.now();
+            execSync("git config user.name 'github-actions[bot]'");
+            execSync("git config user.email 'github-actions[bot]@users.noreply.github.com'");
+            execSync("git checkout -b " + branchName);
+            execSync("git add links/" + finalName + ".yaml");
+            execSync('git commit -m "add friend link: ' + name.replace(/"/g, '\\"') + '"');
+            execSync("git push origin " + branchName);
 
-            // 创建 PR
             const pr = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `添加友链：${name}`,
+              title: "添加友链：" + name,
               head: branchName,
-              base: 'main',
+              base: "main",
               body: [
-                `来自 #${context.issue.number} 的友链申请`,
-                '',
-                '| 字段 | 内容 |',
-                '|------|------|',
-                `| 博客名称 | ${name} |`,
-                `| 网址 | ${url} |`,
-                `| 简介 | ${description} |`,
-                `| 图标 | ![icon](${icon}) |`,
-              ].join('\n'),
+                "来自 #" + context.issue.number + " 的友链申请",
+                "",
+                "| 字段 | 内容 |",
+                "|------|------|",
+                "| 博客名称 | " + name + " |",
+                "| 网址 | " + url + " |",
+                "| 简介 | " + description + " |",
+                "| 图标 | ![](" + icon + ") |",
+              ].join("\n"),
             });
 
-            // 在 Issue 中回复 PR 链接并关闭
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ 校验通过！已自动创建 PR：${pr.data.html_url}\n\n请等待人工审核合入。`,
+              body: "校验通过，已自动创建 PR：" + pr.data.html_url + "\n\n请等待人工审核合入。",
             });
 
             await github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              state: 'closed',
-              labels: ['已生成PR'],
+              state: "closed",
             });
+        env:
+          NAME: ${{ steps.parse.outputs.name }}
+          URL: ${{ steps.parse.outputs.url }}
+          DESC: ${{ steps.parse.outputs.description }}
+          ICON: ${{ steps.parse.outputs.icon }}
+          SAFE_FILE: ${{ steps.parse.outputs.safeFileName }}

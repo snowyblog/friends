@@ -1,0 +1,17 @@
+name: 触发 CF Pages 重建
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "links/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 通知 CF Pages 重建
+        run: |
+          curl -sS -X POST "${{ secrets.CF_DEPLOY_HOOK }}" \
+            -o /dev/null \
+            -w "HTTP %{http_code}\n"

@@ -1,4 +1,4 @@
-name: 友链校验
+name: PR 友链校验
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ jobs:
 
       - run: npm install yaml
 
-      - name: 运行校验脚本
+      - name: 校验 links/ 下的 YAML 文件
         uses: actions/github-script@v7
         with:
           script: |
@@ -62,40 +62,36 @@ jobs:
                 continue;
               }
 
-              // 必填字段校验
               if (!data.name || typeof data.name !== "string") {
-                errors.push(`${file}: 缺少必填字段 "name"（字符串）`);
+                errors.push(`${file}: 缺少必填字段 "name"`);
               }
               if (!data.description || typeof data.description !== "string") {
-                errors.push(`${file}: 缺少必填字段 "description"（字符串）`);
+                errors.push(`${file}: 缺少必填字段 "description"`);
               }
               if (!data.url || typeof data.url !== "string") {
-                errors.push(`${file}: 缺少必填字段 "url"（字符串）`);
+                errors.push(`${file}: 缺少必填字段 "url"`);
               }
               if (!data.icon || typeof data.icon !== "string") {
-                errors.push(`${file}: 缺少必填字段 "icon"（字符串）`);
+                errors.push(`${file}: 缺少必填字段 "icon"`);
               }
 
-              // URL 格式校验
               if (data.url) {
                 try {
                   new URL(data.url);
                 } catch {
                   errors.push(`${file}: url 格式不合法 — "${data.url}"`);
                 }
-
                 if (seenUrls.has(data.url)) {
-                  errors.push(`${file}: url 重复 — "${data.url}" 已存在于其他文件中`);
+                  errors.push(`${file}: url 重复`);
                 }
                 seenUrls.add(data.url);
               }
 
-              // 图标 URL 格式校验
               if (data.icon) {
                 try {
                   new URL(data.icon);
                 } catch {
-                  errors.push(`${file}: icon 格式不合法 — "${data.icon}"`);
+                  errors.push(`${file}: icon 格式不合法`);
                 }
               }
             }

@@ -32,7 +32,6 @@ jobs:
             const body = context.payload.issue.body.replace(/\r\n/g, "\n");
             const errors = [];
 
-            // 按 "### " 分段解析表单字段
             function extractField(title) {
               const regex = new RegExp(`### ${title}\\s*\\n+([\\s\\S]*?)(?=\\n###|$)`, "i");
               const match = body.match(regex);
@@ -70,8 +69,8 @@ jobs:
               }
             }
 
-            // 检查重复
-            const safeFileName = name.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unknown";
+            // 用提交者的 GitHub 用户名作为文件名
+            const safeFileName = context.payload.issue.user.login;
             const linksDir = path.join(process.env.GITHUB_WORKSPACE, "links");
             const existingFiles = fs.readdirSync(linksDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
             for (const file of existingFiles) {
@@ -84,7 +83,7 @@ jobs:
               } catch {}
             }
 
-            // URL 可达性检测（跳过校验失败的才检测）
+            // URL 可达性检测
             if (!errors.some(e => e.includes("网址"))) {
               try {
                 execSync('curl -sS -o /dev/null -w "%{http_code}" --max-time 15 -L "' + url + '"', { encoding: "utf-8" });
@@ -154,6 +153,7 @@ jobs:
             const icon = process.env.ICON;
             const safeFileName = process.env.SAFE_FILE;
 
+            // 如果同名文件已存在（同一人重复提交），追加数字后缀
             let finalName = safeFileName;
             let counter = 1;
             while (fs.existsSync(path.join(process.env.GITHUB_WORKSPACE, "links", finalName + ".yaml"))) {
